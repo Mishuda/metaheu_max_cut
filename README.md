@@ -13,7 +13,7 @@ The implementation is written in **Python** and includes:
 ---
 
 ## Problem Definition: Max-Cut
-Given a (weighted) graph $ G = (V, E) $ with edge weights $ w(u,v) \ge 0 $, find a partition of the vertices into two disjoint sets $ A $ and $ B $ that maximizes:
+Given a (weighted) graph $G = (V, E)$ with edge weights $w(u,v) \ge 0$, find a partition of the vertices into two disjoint sets $A$ and $B$ that maximizes:
 
 $$
 \text{Cut}(A,B) = \sum_{(u,v)\in E} w(u,v)\,\mathbf{1}[u \in A, v \in B]
@@ -21,12 +21,13 @@ $$
 
 ### Encoding
 A candidate solution is encoded as a **bitstring**:
+
 $$
 x \in \{0,1\}^{|V|}
 $$
 
-- `x[v] = 0` → vertex $ v $ is in set $ A $
-- `x[v] = 1` → vertex $ v $ is in set $ B $
+- `x[v] = 0` → vertex $v$ is in set $A$
+- `x[v] = 1` → vertex $v$ is in set $B$
 
 This encoding is symmetric: flipping all bits yields the same cut.
 
@@ -36,10 +37,10 @@ This encoding is symmetric: flipping all bits yields the same cut.
 
 ### Neighborhood
 - A move consists of **flipping one vertex** to the opposite side.
-- The neighborhood of a solution contains exactly $ |V| $ such moves.
+- The neighborhood of a solution contains exactly $|V|$ such moves.
 
 ### Objective Gain (Δ-evaluation)
-For each vertex $ v $, the gain of flipping it is:
+For each vertex $v$, the gain of flipping it is:
 
 $$
 \Delta(v) = \sum_{u \in N(v)} w(v,u)
@@ -49,7 +50,7 @@ $$
 \end{cases}
 $$
 
-This allows **incremental updates** in $ O(\deg(v)) $ time instead of recomputing the full cut value.
+This allows **incremental updates** in $O(\deg(v))$ time instead of recomputing the full cut value.
 
 ### Tabu Mechanism
 - Recently flipped vertices are marked **tabu** for a fixed or randomized tenure.
@@ -78,7 +79,7 @@ These baselines help demonstrate the added value of tabu memory.
 ## Experimental Setup
 
 ### Instance Generation
-- Random Erdős–Rényi graphs $ G(n,p) $
+- Random Erdős–Rényi graphs $G(n,p)$
 - Integer edge weights sampled uniformly in $[1,10]$
 - Fully reproducible via controlled random seeds
 

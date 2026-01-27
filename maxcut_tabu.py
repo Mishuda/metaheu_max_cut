@@ -214,130 +214,162 @@ def greedy_hill_climb(G, seed=0, max_iters=2000):
     return {"current_x": x, "current_F": int(F), "final_x": x, "final_F": int(F), "iters": max_iters}
 
 
-#experiments
-# Experiment grid
-n_values = [50, 100, 200]
-p_values = [0.1, 0.3]
-tenures = [5, 10, 20]
-seeds = list(range(10))
+def _pad_histories(histories):
+    if not histories:
+        return None, None, None, 0
+    max_len = max(len(h) for h in histories)
+    H = np.zeros((len(histories), max_len), dtype=float)
+    for i, h in enumerate(histories):
+        H[i, :len(h)] = h
+        if len(h) < max_len:
+            H[i, len(h):] = h[-1]
+    mean_curve = H.mean(axis=0)
+    std_curve = H.std(axis=0)
+    return H, mean_curve, std_curve, max_len
 
-rows = []
 
-for n in n_values:
-    for p in p_values:
-        for seed in seeds:
-            seeds_map = derive_seeds(seed)
-            G = generate_graph(n, p, weighted=True, seed=seeds_map["instance_seed"])
+def run_experiments():
+    # Experiment grid
+    n_values = [50, 100, 200]
+    p_values = [0.1, 0.3]
+    tenures = [5, 10, 20]
+    seeds = list(range(10))
 
-            # Random baseline
-            t0 = time.perf_counter()
-            r = random_search(G, num_samples=300, seed=seeds_map["random_seed"])
-            rows.append({
-                "n": n, "p": p, "tenure": None, "seed": seed, "method": "random",
-                "best_F": r["best_F"], "final_F": r["final_F"], "iters": r["iters"],
-                "seconds": time.perf_counter() - t0,
-            })
+    chosen_n = 100
+    chosen_p = 0.3
+    chosen_tenure = 10
 
-            # Greedy baseline
-            t0 = time.perf_counter()
-            g = greedy_hill_climb(G, seed=seeds_map["greedy_seed"], max_iters=2000)
-            rows.append({
-                "n": n, "p": p, "tenure": None, "seed": seed, "method": "greedy",
-                "best_F": g["final_F"], "final_F": g["final_F"], "iters": g["iters"],
-                "seconds": time.perf_counter() - t0,
-            })
+    rows = []
+    history_samples = []
 
-            # Tabu Search across tenures
-            for tenure in tenures:
+    for n in n_values:
+        for p in p_values:
+            for seed in seeds:
+                seeds_map = derive_seeds(seed)
+                G = generate_graph(n, p, weighted=True, seed=seeds_map["instance_seed"])
+
+                # Random baseline
                 t0 = time.perf_counter()
-                t = tabu_search_maxcut(
-                    G,
-                    max_iters=2000,
-                    tenure=tenure,
-                    seed=seeds_map["algo_seed"],
-                    patience=500,
-                )
+                r = random_search(G, num_samples=300, seed=seeds_map["random_seed"])
                 rows.append({
-                    "n": n, "p": p, "tenure": tenure, "seed": seed, "method": "tabu",
-                    "best_F": t["best_F"], "final_F": t["final_F"], "iters": t["iters"],
+                    "n": n, "p": p, "tenure": None, "seed": seed, "method": "random",
+                    "best_F": r["best_F"], "final_F": r["final_F"], "iters": r["iters"],
                     "seconds": time.perf_counter() - t0,
                 })
 
-results = pd.DataFrame(rows)
-results.head()
+                # Greedy baseline
+                t0 = time.perf_counter()
+                g = greedy_hill_climb(G, seed=seeds_map["greedy_seed"], max_iters=2000)
+                rows.append({
+                    "n": n, "p": p, "tenure": None, "seed": seed, "method": "greedy",
+                    "best_F": g["final_F"], "final_F": g["final_F"], "iters": g["iters"],
+                    "seconds": time.perf_counter() - t0,
+                })
+
+                # Tabu Search across tenures
+                for tenure in tenures:
+                    t0 = time.perf_counter()
+                    t = tabu_search_maxcut(
+                        G,
+                        max_iters=2000,
+                        tenure=tenure,
+                        seed=seeds_map["algo_seed"],
+                        patience=500,
+                    )
+                    rows.append({
+                        "n": n, "p": p, "tenure": tenure, "seed": seed, "method": "tabu",
+                        "best_F": t["best_F"], "final_F": t["final_F"], "iters": t["iters"],
+                        "seconds": time.perf_counter() - t0,
+                    })
+                    if (n == chosen_n and p == chosen_p and tenure == chosen_tenure):
+                        history_samples.append(t["best_history"])
+
+    results = pd.DataFrame(rows)
+    print(results.head())
+
+    # PLOTS
+    # a) mean curve + variability band (std or quantiles)
+    H, mean_curve, std_curve, max_len = _pad_histories(history_samples)
+    if H is not None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(mean_curve, label="mean best_F")
+        ax.fill_between(
+            np.arange(max_len),
+            mean_curve - std_curve,
+            mean_curve + std_curve,
+            alpha=0.2,
+            label="±1 std",
+        )
+        ax.set(
+            title=f"Tabu best_F vs iteration (n={chosen_n}, p={chosen_p}, tenure={chosen_tenure})",
+            xlabel="iteration",
+            ylabel="best_F",
+        )
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        plt.show()
+    else:
+        print("No tabu histories collected for the chosen (n, p, tenure).")
+
+    # b) boxplot that respects tenure
+    subset = results[(results["n"] == 100) & (results["p"] == 0.3) &
+                     ((results["method"] != "tabu") | (results["tenure"] == 10))].copy()
+
+    subset["label"] = subset.apply(
+        lambda r: f"tabu_t{int(r['tenure'])}" if r["method"] == "tabu" else r["method"],
+        axis=1
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    subset.boxplot(column="best_F", by="label", ax=ax)
+    ax.set_title("Best cut values (n=100, p=0.3)")
+    ax.set_xlabel("")
+    ax.set_ylabel("best_F")
+    plt.suptitle("")
+    ax.grid(True, axis="y", alpha=0.3)
+    plt.xticks(rotation=0)
+    plt.show()
+
+    # c) Runtime vs n, split by p
+    tabu_only = results[results["method"] == "tabu"].copy()
+    tabu_only = tabu_only[tabu_only["tenure"] == 10]  # fix one tenure for readability
+
+    grouped = tabu_only.groupby(["p", "n"])["seconds"].mean().reset_index()
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for pval, dfp in grouped.groupby("p"):
+        ax.plot(dfp["n"], dfp["seconds"], marker="o", label=f"p={pval}")
+    ax.set(title="Mean runtime vs n (Tabu, tenure=10)",
+           xlabel="n", ylabel="seconds")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    plt.show()
+
+    return results
 
 
-#PLOTS
-# a) mean curve + variability band (std or quantiles)
-std_curve = H.std(axis=0)
+def run_example():
+    # Run one example instance and print the partition
+    seeds_map = derive_seeds(42)
+    G = generate_graph(50, 0.2, weighted=True, seed=seeds_map["instance_seed"])
+    res = tabu_search_maxcut(
+        G,
+        max_iters=3000,
+        tenure=10,
+        seed=seeds_map["algo_seed"],
+        patience=800,
+    )
 
-fig, ax = plt.subplots(figsize=(8,4))
-ax.plot(mean_curve, label="mean best_F")
-ax.fill_between(np.arange(max_len),
-                mean_curve - std_curve,
-                mean_curve + std_curve,
-                alpha=0.2, label="±1 std")
-ax.set(title=f"Tabu best_F vs iteration (n={chosen_n}, p={chosen_p}, tenure={chosen_tenure})",
-       xlabel="iteration", ylabel="best_F")
-ax.grid(True, alpha=0.3)
-ax.legend()
-plt.show()
+    node_list = list(G.nodes())
+    A = [node_list[i] for i, bit in enumerate(res["best_x"]) if bit == 0]
+    B = [node_list[i] for i, bit in enumerate(res["best_x"]) if bit == 1]
 
-
-# b) boxplot that respects tenure
-subset = results[(results["n"]==100) & (results["p"]==0.3) &
-                 ((results["method"]!="tabu") | (results["tenure"]==10))].copy()
-
-subset["label"] = subset.apply(
-    lambda r: f"tabu_t{int(r['tenure'])}" if r["method"]=="tabu" else r["method"],
-    axis=1
-)
-
-fig, ax = plt.subplots(figsize=(8,4))
-subset.boxplot(column="best_F", by="label", ax=ax)
-ax.set_title("Best cut values (n=100, p=0.3)")
-ax.set_xlabel("")
-ax.set_ylabel("best_F")
-plt.suptitle("")
-ax.grid(True, axis="y", alpha=0.3)
-plt.xticks(rotation=0)
-plt.show()
+    print("best cut value:", res["best_F"])
+    print("|A|=", len(A), "|B|=", len(B))
+    print("A:", A)
+    print("B:", B)
 
 
-# c) Runtime vs n, split by p
-tabu_only = results[results["method"]=="tabu"].copy()
-tabu_only = tabu_only[tabu_only["tenure"]==10]  # fix one tenure for readability
-
-grouped = tabu_only.groupby(["p", "n"])["seconds"].mean().reset_index()
-
-fig, ax = plt.subplots(figsize=(7,4))
-for pval, dfp in grouped.groupby("p"):
-    ax.plot(dfp["n"], dfp["seconds"], marker="o", label=f"p={pval}")
-ax.set(title="Mean runtime vs n (Tabu, tenure=10)",
-       xlabel="n", ylabel="seconds")
-ax.grid(True, alpha=0.3)
-ax.legend()
-plt.show()
-
-
-
-
-# Run one example instance and print the partition
-seeds_map = derive_seeds(42)
-G = generate_graph(50, 0.2, weighted=True, seed=seeds_map["instance_seed"])
-res = tabu_search_maxcut(
-    G,
-    max_iters=3000,
-    tenure=10,
-    seed=seeds_map["algo_seed"],
-    patience=800,
-)
-
-node_list = list(G.nodes())
-A = [node_list[i] for i, bit in enumerate(res["best_x"]) if bit == 0]
-B = [node_list[i] for i, bit in enumerate(res["best_x"]) if bit == 1]
-
-print("best cut value:", res["best_F"])
-print("|A|=", len(A), "|B|=", len(B))
-print("A:", A)
-print("B:", B)
+if __name__ == "__main__":
+    run_experiments()
+    run_example()

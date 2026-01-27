@@ -79,6 +79,12 @@ def tabu_search_maxcut(
     # - delta[v] = gain if we flip v
     # - tabu_until[v] stores the earliest iteration when v becomes admissible
     # - tenure is randomized each move (use int for [1, tenure] or tuple/list for [lo, hi])
+    if isinstance(tenure, (tuple, list)):
+        if len(tenure) != 2 or tenure[0] <= 0 or tenure[1] <= 0:
+            raise ValueError("tenure must be a positive int or a (low, high) pair of positive ints")
+    else:
+        if tenure <= 0:
+            raise ValueError("tenure must be a positive int")
     node_list = list(G.nodes())
     node_index = {v: i for i, v in enumerate(node_list)}
     n = len(node_list)
@@ -177,7 +183,7 @@ def random_search(G, num_samples=500, seed=0):
         F = cut_value(G, x, node_list, node_index)
         if F > best_F:
             best_F = F
-            best_x = x
+            best_x = x.copy()
     return {"best_x": best_x, "best_F": int(best_F), "final_x": best_x, "final_F": int(best_F), "iters": num_samples}
 
 
@@ -247,6 +253,8 @@ def run_experiments():
             for seed in seeds:
                 seeds_map = derive_seeds(seed)
                 G = generate_graph(n, p, weighted=True, seed=seeds_map["instance_seed"])
+                m = G.number_of_edges()
+                total_weight = sum(data.get("weight", 1) for _, _, data in G.edges(data=True))
 
                 # Random baseline
                 t0 = time.perf_counter()
@@ -254,6 +262,7 @@ def run_experiments():
                 rows.append({
                     "n": n, "p": p, "tenure": None, "seed": seed, "method": "random",
                     "best_F": r["best_F"], "final_F": r["final_F"], "iters": r["iters"],
+                    "m": m, "total_weight": total_weight,
                     "seconds": time.perf_counter() - t0,
                 })
 
@@ -263,28 +272,32 @@ def run_experiments():
                 rows.append({
                     "n": n, "p": p, "tenure": None, "seed": seed, "method": "greedy",
                     "best_F": g["final_F"], "final_F": g["final_F"], "iters": g["iters"],
+                    "m": m, "total_weight": total_weight,
                     "seconds": time.perf_counter() - t0,
                 })
 
                 # Tabu Search across tenures
                 for tenure in tenures:
+                    algo_seed = seeds_map["algo_seed"] + 100 * tenure
                     t0 = time.perf_counter()
                     t = tabu_search_maxcut(
                         G,
                         max_iters=2000,
                         tenure=tenure,
-                        seed=seeds_map["algo_seed"],
+                        seed=algo_seed,
                         patience=500,
                     )
                     rows.append({
                         "n": n, "p": p, "tenure": tenure, "seed": seed, "method": "tabu",
                         "best_F": t["best_F"], "final_F": t["final_F"], "iters": t["iters"],
+                        "m": m, "total_weight": total_weight,
                         "seconds": time.perf_counter() - t0,
                     })
                     if (n == chosen_n and p == chosen_p and tenure == chosen_tenure):
                         history_samples.append(t["best_history"])
 
     results = pd.DataFrame(rows)
+    results.to_csv("results_maxcut_tabu.csv", index=False)
     print(results.head())
 
     # PLOTS
@@ -307,6 +320,7 @@ def run_experiments():
         )
         ax.grid(True, alpha=0.3)
         ax.legend()
+        fig.savefig("tabu_mean_curve.png", dpi=200, bbox_inches="tight")
         plt.show()
     else:
         print("No tabu histories collected for the chosen (n, p, tenure).")
@@ -328,6 +342,7 @@ def run_experiments():
     plt.suptitle("")
     ax.grid(True, axis="y", alpha=0.3)
     plt.xticks(rotation=0)
+    fig.savefig("best_F_boxplot.png", dpi=200, bbox_inches="tight")
     plt.show()
 
     # c) Runtime vs n, split by p
@@ -343,6 +358,22 @@ def run_experiments():
            xlabel="n", ylabel="seconds")
     ax.grid(True, alpha=0.3)
     ax.legend()
+    fig.savefig("runtime_vs_n.png", dpi=200, bbox_inches="tight")
+    plt.show()
+
+    # d) Tabu-only boxplot by tenure
+    tabu_subset = results[(results["method"] == "tabu") &
+                          (results["n"] == 100) &
+                          (results["p"] == 0.3)].copy()
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    tabu_subset.boxplot(column="best_F", by="tenure", ax=ax)
+    ax.set_title("Tabu performance vs tenure (n=100, p=0.3)")
+    ax.set_xlabel("tenure")
+    ax.set_ylabel("best_F")
+    plt.suptitle("")
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.savefig("tabu_performance_vs_tenure.png", dpi=200, bbox_inches="tight")
     plt.show()
 
     return results

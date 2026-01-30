@@ -128,7 +128,7 @@ def tabu_search_maxcut(
         if isinstance(tenure, (tuple, list)) and len(tenure) == 2:
             tenure_low, tenure_high = tenure
         else:
-            enure_low, tenure_high = 1, tenure
+            tenure_low, tenure_high = 1, tenure
         tenure_len = int(rng.integers(tenure_low, tenure_high + 1))
         tabu_until[best_v] = it + tenure_len
 
